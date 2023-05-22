@@ -13,3 +13,4 @@ database("Network").Table1
     | evaluate bag_unpack(record, columnsConflict='replace_source' )
 )
 on DomainName
+| project proxy_policy=policy,  proxy_urlcategory=urlcategory, proxy_urlclass=urlclass, appname, appclass, edr_aid=aid, event_simpleName, FirstIP4Record, IP4Records, RespondingDnsServer
