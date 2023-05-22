@@ -1,0 +1,15 @@
+let sus_domain = "badsite.com";
+database("Network").Table1
+    | where  TimeGenerated < ago(30m)
+    | where parse_json(record).hostname == sus_domain
+    | take 10
+    | extend hostname = tostring(parse_json(record).hostname)
+    | evaluate bag_unpack(record, columnsConflict='replace_source' )
+| project-rename DomainName = hostname
+| join
+    ( database("Endpoint").Table2
+    | where  TimeGenerated < ago(30m)
+    | where parse_json(record).DomainName == sus_domain | take 10
+    | evaluate bag_unpack(record, columnsConflict='replace_source' )
+)
+on DomainName
