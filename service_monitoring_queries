@@ -1,0 +1,22 @@
+//Investigate Admin Activities
+database("Network").IoT
+| where  logdesc has "Admin"
+| project  user, TimeGenerated = parse_json(record).TimeGenerated,
+        devname = parse_json(record).devname,
+        devid = parse_json(record).devid,
+        msg = parse_json(record).msg,
+        logdesc = parse_json(record).logdesc,
+        status = parse_json(record).status
+| sort by user
+ 
+//view network link monitor status
+database("Network").IoT
+| where  logdesc=="Link monitor status"
+| project TimeGenerated, host, msg, name, vd, devname, devid, interface, logdesc
+  
+//Investigate BYOD
+database("Network").IoT
+| where TimeGenerated > ago(1d)
+| where domain=="Guest-Wifi"  
+| summarize total_device_count=count() by devtype
+| sort by total_device_count | render columnchart
