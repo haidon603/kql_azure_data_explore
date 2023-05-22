@@ -1,0 +1,50 @@
+//search connections to .ru domains. many orgs block .ru as lot's of malware originates from russia. 
+database("Network").proxytable
+| where  TimeGenerated < ago(30m)
+| where parse_json(record).hostname endswith '.ru'
+ 
+//search suspicious proxy activity on company issued device. is someone violating "resonable personal use?"
+database("Network").proxytable
+| where  TimeGenerated < ago(2m)
+| where parse_json(record).urlsupercategory in ("Illegal or Questionable","Drugs","Weapons/Bombs","Militancy/Hate and Extremism", "Adult Material","Job/Employment Search")
+| extend usrName = tostring(parse_json(record).usrName),
+urlsupercategory = tostring(parse_json(record).urlsupercategory)
+| summarize  unameCount=count() by usrName, urlsupercategory
+ 
+//timechart by proxy req types. are there an unreasonable amount of POST/PUT requests after standard company hours? 
+database("Network").proxytable
+| where  TimeGenerated > ago(7d)
+//| where parse_json(record).urlclass == 'Security Risk'
+| extend reqmethod = tostring(parse_json(record).reqmethod)
+| summarize count= count() by reqmethod ,bin(TimeGenerated, 1h) | render timechart  
+ 
+//top 10 proxy activity by action and app. what is displayed? is this expected?
+database("Network").proxytable
+| where  TimeGenerated > ago(24h)
+| extend  action = tostring(parse_json(record).Action),
+  appname = tostring(parse_json(record).appname)
+| summarize c=count() by action, appname
+| top 10 by c
+
+ 
+// unauthorized P2P activity. is someone trying to evade monitoring? 
+database("Network").proxytable
+| where  TimeGenerated < ago(20m)
+| where record.appclass == 'P2P'
+| evaluate bag_unpack(record, columnsConflict='replace_source')
+ 
+//top 10 talkers by source IP. who are the "loud" users? are they authorized? 
+database("Network").proxytable
+| where  TimeGenerated > ago(24h)
+| extend    src = tostring(parse_json(record).src)
+| summarize c=count() by src
+| sort by c
+| top 10 by c
+ 
+//Rare  user agents. look for spoofed or hand crafted agents 
+database("Network").proxytable
+| where  TimeGenerated > ago(24h)
+| extend    useragent = tostring(parse_json(record).useragent)
+| summarize c=count() by useragent
+| sort by c asc
+| take 30
