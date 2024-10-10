@@ -1,0 +1,12 @@
+EDRTable
+| where TimeGenerated > ago(1d)
+| where event_simpleName == 'CommandHistory'
+|where CommandHistory matches regex "(irm|wget|curl|iwr|invoke-webrequest|invoke-restmethod) [0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}" // WORKS
+| project TimeGenerated, ComputerName, CommandHistory, event_simpleName, ApplicationName, AccountType, File, OU, event_platform, SensorGroupingTags
+| extend Extracted_IP = extract("(([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})\\.(([0-9]{1,3})))",1,CommandHistory) // WORKS
+//tune as needed| where Extracted_IP != "my.corp.ip.safe"
+| extend CommandHistory_split=split(CommandHistory,'¶')
+| project geo_info_from_ip_address(Extracted_IP),Extracted_IP, ComputerName,CommandHistory_split
+|summarize count() by tostring(Column1.country),tostring(Column1.city), Extracted_IP, ComputerName,tostring(CommandHistory_split)
+ 
+ 
