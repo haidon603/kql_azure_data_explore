@@ -1,0 +1,21 @@
+let RMM = external_data(InstallationPath:string)[@https://lolrmm.io/api/rmm_tools.csv] with (format="csv", ignoreFirstRecord=True);
+EDRTable
+| where TimeGenerated >= ago(1d)
+| where ContextBaseFileName has_any (RMM)
+| where event_simpleName startswith_cs 'NetworkConnect'
+| where not(ipv4_is_private(RemoteAddressIP4))
+| extend  geo_info_from_ip_address(RemoteAddressIP4)
+| project
+    TimeGenerated,
+    event_simpleName,
+    ContextBaseFileName,
+    LocalAddressIP4,
+    LocalPort,
+    RemoteAddressIP4,
+    RemotePort,
+    IP4Country=tostring(Column1.country),
+    IP4City=tostring(Column1.city),
+    RemoteAddressIP6,
+    Protocol,
+| where IP4Country != "United States"  //adjust as needed for your vertical
+| sort by IP4Country
