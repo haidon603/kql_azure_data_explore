@@ -1,0 +1,8 @@
+EDRTable
+| where TimeGenerated > ago(1d)
+| where event_simpleName == "ProcessRollup2"
+| where ImageFileName matches regex '\\\\Device\\\\HarddiskVolume3\\\\Users\\\\\\w+\\\\Downloads\\\\*.exe'
+| project TimeGenerated,event_platform, ComputerName, event_simpleName, FileName, ImageFileName,record, SHA256HashData
+| summarize count(ImageFileName), make_set(ImageFileName), make_set(SHA256HashData)  by event_simpleName, FileName
+| sort by count_ImageFileName asc
+ 
