@@ -1,0 +1,62 @@
+EmailTable
+| where TimeGenerated > ago(1d)
+| where isempty(QuarantineFolder)
+| where isempty(QuarantineRule)
+| project
+    TimeGenerated,
+    Sender,
+    Recipient,
+    Subject,
+    attachment_name = tostring(msgParts[2].labeledName),
+    file_type = tostring(msgParts[2].labeledExt),
+    ['filter'],
+    QuarantineFolder,
+    QuarantineRule,
+    MessageID
+| where isnotempty(attachment_name)
+| where isnotempty(file_type)
+| where not(file_type has_any (
+'png',
+'txt',
+'jpg',
+'pdf',
+'gif',
+'html',
+'docx',
+'xlsx',
+'jpeg',
+'ics',
+'csv',
+'pptx',
+'ppt',
+'doc',
+'xls',
+'blp',
+'wmz',
+'webp',
+'p7s',
+'xlsm',
+'emz',
+'htm',
+'heic',
+'msg',
+'mso',
+'eml',
+'mp4',
+'tiff',
+'rpmsg',
+'rtf',
+'mail',
+'vcf',
+'pub',
+'jfif',
+'svg',
+'tif',
+'vsdx',
+'mov'
+))
+| where Sender !has "@youcompanydomain.com" //to return ingress emails only
+//tune as needed | where Recipient != archiveemail@myemail.ha
+| summarize make_set(attachment_name),make_set(Sender), make_set(Subject), dcount(Subject), dcount(Recipient), make_set(Recipient), make_set(TimeGenerated) by file_type
+| sort by dcount_Recipient asc
+ 
