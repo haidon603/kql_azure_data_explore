@@ -1,0 +1,40 @@
+//New Hire IT Infiltration – Queries for newly created accounts and joins on productivity logs to identify mass downloads
+database("Endpoint").EDR_Telemetry
+| where TimeGenerated > ago(30d) //adjust as needed
+| where event_simpleName == "ActiveDirectoryAccountCreated"
+| where SamAccountName startswith "abc" // your username naming convention here
+| where not (SamAccountName has_any ("$"))
+| project UserId = strcat("", ", SamAccountName, "@emaildomain.com)
+| summarize by tostring(UserId)
+| join kind=inner
+    (
+    database("Application").Productivity_Telemetry
+    | where TimeGenerated > ago(30d)  //adjust as needed
+    | where Operation == 'FileDownloaded'  //adjust as needed
+    | project
+        TimeGenerated,
+        ItemType,
+        OfficeObjectId,
+        tostring(UserId),
+        Operation,
+        SourceFileName,
+        Site_Url,
+        SourceFileExtension,
+        SourceRelativeUrl,
+        UserAgent,
+        UserType)
+    on UserId
+| project
+    TimeGenerated,
+    ItemType,
+    OfficeObjectId,
+    UserId,
+    Operation,
+    SourceFileName,
+    Site_Url,
+    SourceFileExtension,
+    SourceRelativeUrl,
+    UserAgent,
+    UserType
+| summarize c=count() by UserId, Operation
+| sort by c desc
