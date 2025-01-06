@@ -1,0 +1,8 @@
+//Return matched value in new column titled 'MatchedTerm'. Very useful for threat hunting through CLI logs or unparsed logs!
+let SearchTerm = dynamic(["8.8.8.8", "1.2.3.4", "127.0.0.1"]); //Search terms here
+let Events = datatable(LogID:string, RawLog:string)['log1',"google dns 8.8.8.8", 'log2', "some numbers 1.2.3.4", 'log3', "Nothing here!!", 'log4', "1.2.3.4 and 127.0.0.1"]; //Create Sample Table
+Events //Call Table
+| extend Idx = has_any_index(RawLog, SearchTerm) //Searches the string for items specified in the array and returns the position in the array of the first item found in the string to variable IDX
+| extend MatchedTerm = iif(Idx<0, "NO MATCH FOUND", tostring(SearchTerm[Idx]))
+| project LogID, RawLog, MatchedTerm
+ 
