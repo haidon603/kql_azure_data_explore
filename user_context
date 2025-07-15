@@ -1,0 +1,65 @@
+//searches that help illustrate a user's behavior
+
+//a user's search engine searches 
+Proxy
+| where TimeGenerated > ago(72h) // | where url has 'meme' (can add terms of interest to threat hunt)
+| where url has "google.com/search?q=" or
+url has "google.ca/complete/search?q=" or
+url has "bing.com/search?q=" or
+(url has "duckduckgo.com/ac/?q=" and hostname == "duckduckgo.com") or
+(url has "search.yahoo.com/search?p=" and url startswith "search.yahoo")
+| project yahoo = extract("q=|p=(.*?\\&)", 1, url), ['others'] = extract (\\?p|\\?q=(.*?\\&), 1, url), url,hostname,TimeGenerated, context=strcat("host: ",devicehostname," owner: ",deviceowner," ip: ","src", " role: ",role), Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| project extract_basesearch = coalesce(yahoo, ['others']),url,hostname,TimeGenerated, context, Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| extend replace_plus_sign = replace_string( extract_basesearch, "+", " ")
+| project remove_ampersand=trim('&', replace_plus_sign), url, replace_plus_sign, extract_basesearch, hostname,TimeGenerated, context, Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| extend remove_hexspace = replace_string( remove_ampersand, "%20", " ")
+| project remove_hexspace,remove_ampersand,  replace_plus_sign, extract_basesearch,url, hostname, TimeGenerated, context,Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| project SearchedTerms=remove_hexspace,url, hostname,referer, TimeGenerated, context,Action,policy,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+
+//search if user may be out of the office
+EmailDB
+| where TimeGenerated > ago(30d)
+| where SenderAddress == (Email_t) and   Subject contains "Automatic reply:"
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user submitted time off
+EmailDB
+| where TimeGenerated > ago(30d)
+| where Recipient ==  (Email_t) and Sender == timeoffrequestse@company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user has any recent tickets open with IT (asset request, troubleshooting, change management, variance request, etc. )
+EmailDB
+| where TimeGenerated > ago(30d)
+| where Recipient == (Email_t )
+| where Sender has internalticketingsystem@company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user has been traveling for work
+EmailDB
+| where TimeGenerated > ago(30d)
+| where RecipientAddress ==  (Email_t) and Sender == travelandexpensemgmt@company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user has any recent cases with HR
+EmailDB
+| where TimeGenerated > ago(30d)
+| where Recipient == (Email_t )
+| where Sender has HR@company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user has been applying for an internal transfer
+EmailDB
+| where TimeGenerated > ago(30d)
+| where Recipient == (Email_t )
+| where Sender has internal@recruitment.company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+//search if user has has any significant life changes
+EmailDB
+| where TimeGenerated > ago(30d)
+| where Recipient == (Email_t )
+| where Sender has benefitsenrollment@company.com
+| project TimeGenerated, Sender, Recipient ,Subject, MessageID, msgParts
+ 
+ 
