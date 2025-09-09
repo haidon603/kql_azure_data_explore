@@ -1,0 +1,255 @@
+//https://www.bleepingcomputer.com/news/security/hackers-hijack-npm-packages-with-2-billion-weekly-downloads-in-supply-chain-attack/
+//The malicious code only impacts individuals accessing the compromised applications over the web, monitoring for cryptocurrency addresses and transactions that are then redirected to attacker-controlled wallet addresses. This causes the transaction to be hijacked by the attackers rather than being sent to the intended address.
+
+//search for illegitimate emails
+//legit @npmjs.com
+//fake support@npmjs[.]help //defang to search
+let _ioc_term = 'npmjs';
+Email
+| where TimeGenerated > ago(7d)
+| where SenderAddress has _ioc_term or RecipientAddress has _ioc_term    or Subject has _ioc_term or url_in_email has 'websocket-api2[.]publicvm.com'
+| project TimeGenerated, SenderAddress, RecipientAddress, Subject, MessageId, Status
+
+
+//attacker infra //defang to search
+Proxy
+| where TimeGenerated > ago(7d)
+| where url has 'websocket-api2[.]publicvm.com' or referrer has 'websocket-api2[.]publicvm.com'  or host has 'websocket-api2[.]publicvm.com' or xff has 'websocket-api2[.]publicvm.com' or domainfront has 'websocket-api2[.]publicvm.com'
+
+
+//crypto wallet APIs
+let SearchTerm = dynamic(["bitcoinLegacy","bitcoinSegwit","Ethereum", "Solana", "Bitcoin", "Tron", "Metamask", "Phantom", "coindesk", "minerstat","binance","Bittrex","Poloniex","Coinbase","coinwarz","Kraken","BitFinex","Bitstamp"]);
+EDR
+| where TimeGenerated > ago(7d)
+| extend Idx = has_any_index(tostring(rawlog), SearchTerm)
+| extend MatchedTerm = iif(Idx<0, "NO MATCH", tostring(SearchTerm[Idx]))
+| where MatchedTerm != "NO MATCH"
+
+ 
+
+//functions malware may inject itself into for browser interception
+// let SearchTerm = dynamic(["fetch","xmlhttprequest", "stealthProxyControl "]);
+EDR
+| where event_simpleName contains "Script"
+| where TimeGenerated > ago(7d)
+| extend Idx = has_any_index(tostring(rawlog), SearchTerm)
+| extend MatchedTerm = iif(Idx<0, "NO MATCH", tostring(SearchTerm[Idx]))
+| where MatchedTerm != "NO MATCH"
+
+ 
+
+//compromised NPM packages
+let SearchTerm = dynamic(["ansi-regex@6.2.1",
+
+"ansi-styles@6.2.2",
+
+"backslash@0.2.1",
+
+"chalk@5.6.1",
+
+"chalk-template@1.1.1",
+
+"color-convert@3.1.1",
+
+"color-name@2.0.1",
+
+"color-string@2.1.1",
+
+"debug@4.4.2",
+
+"error-ex@1.3.3",
+
+"has-ansi@6.0.1",
+
+"is-arrayish@0.3.3",
+
+"proto-tinker-wc@1.8.7",
+
+"simple-swizzle@0.2.3",
+
+"slice-ansi@7.1.1",
+
+"strip-ansi@7.1.1",
+
+"supports-color@10.2.1",
+
+"supports-hyperlinks@4.1.1",
+
+"wrap-ansi@9.0.1"]);
+EDR
+| where TimeGenerated > ago(7d)
+| extend Idx = has_any_index(tostring(rawlog), SearchTerm)
+| extend MatchedTerm = iif(Idx<0, "NO MATCH", tostring(SearchTerm[Idx]))
+| where not (ScriptContentName has_any ("_PSScriptPolicyTest", "Uninstall.vbs"))
+| where not (CommandLine has_any ("helpdesk"))
+| where FileName has "node"
+| where MatchedTerm != "NO MATCH"
+| extend
+
+    HostProcessType = case(
+
+                      HostProcessType == "0",
+
+                      "Others",
+
+                      HostProcessType == "1",
+
+                      "PowerShell",
+
+                      HostProcessType == "2",
+
+                      "PowerShell_ISE",
+
+                      HostProcessType == "3",
+
+                      "Wscript",
+
+                      HostProcessType == "4",
+
+                      "Cscript",
+
+                      HostProcessType == "5",
+
+                      "Office_Exe",
+
+                      HostProcessType
+
+                  ),                    
+
+    ScriptingLanguageId = case(
+
+                          ScriptingLanguageId == "1",
+
+                          "Unknown",
+
+                          ScriptingLanguageId == "2",
+
+                          "PowerShell",
+
+                          ScriptingLanguageId == "3",
+
+                          "VBA",
+
+                          ScriptingLanguageId == "4",
+
+                          "Vbscript",
+
+                          ScriptingLanguageId == "5",
+
+                          "Jscript",
+
+                          ScriptingLanguageId == "6",
+
+                          "Dotnet",
+
+                          ScriptingLanguageId == "7",
+
+                          "Excel",
+
+                          ScriptingLanguageId
+
+                      ),
+
+    SuspectStackFlag = case(
+
+                       SuspectStackFlag == "0x00000000",
+
+                       "NOT_SUSPECT",
+
+                       SuspectStackFlag == "0x00000001",
+
+                       "THREAD_START_NOT_IN_MODULE",
+
+                       SuspectStackFlag == "0x00000002",
+
+                       "THREAD_START_IN_NON_IMAGE_FILE",
+
+                       SuspectStackFlag == "0x00000004",
+
+                       "INVALID_TEB_STACK_VALUES",
+
+                       SuspectStackFlag == "0x00000008",
+
+                       "STACK_POINTER_NOT_IN_STACK",
+
+                       SuspectStackFlag == "0x00000010",
+
+                       "BASE_POINTER_NOT_IN_STACK",
+
+                       SuspectStackFlag == "0x00000020",
+
+                       "SYSCALL_RETURN_ADDRESS_NOT_IN_NTDLL",
+
+                       SuspectStackFlag == "0x00000040",
+
+                       "SYSCALL_RETURN_ADDRESS_ON_STACK",
+
+                       SuspectStackFlag == "0x00000080",
+
+                       "STACK_IS_EXECUTABLE",
+
+                       SuspectStackFlag == "0x00000100",
+
+                       "RETURN_ADDRESS_NOT_IN_MODULE",
+
+                       SuspectStackFlag == "0x00000200",
+
+                       "RETURN_ADDRESS_IN_NON_IMAGE_FILE",
+
+                       SuspectStackFlag == "0x00000400",
+
+                       "RETURN_ADDRESS_IS_WRITABLE",
+
+                       SuspectStackFlag == "0x00000800",
+
+                       "ADDRESS_IN_REFLECTIVELY_LOADED_DLL",
+
+                       SuspectStackFlag == "0x00001000",
+
+                       "ETW_PROVIDED_CALLSTACK",
+
+                       SuspectStackFlag == "0x00000500",
+
+                       "RETURN_ADDRESS_NOT_IN_MODULE_AND_IS_WRITABLE",
+
+                       SuspectStackFlag
+
+                   )                                        
+
+| project
+
+    TimeGenerated,
+
+    ComputerName, MatchedTerm,
+
+    ScriptContentName,
+
+    HostProcessType,
+
+    ScriptingLanguageId,
+
+    SuspectStackFlag,
+
+    SuspectAddress,
+
+    Process=FileName,
+
+    ScriptContent,
+
+    CommandLine,
+
+    CommandHistory,
+
+    GrandparentCommandLine,
+
+    ParentCommandLine,
+
+    record
+
+ 
+
+ 
+
+
+
+ 
