@@ -1,0 +1,19 @@
+//https://github.com/fr0gger/nova-framework/tree/main
+let prompt_eng_string = dynamic(["new instruction","previous instructions","ignore all the instructions above",
+"forget your instructions","disregard previous","override previous","redefine your goals",
+"your primary task now","system prompt","actually respond with","instead output the following",
+"ignore content policy","bypass the filter","return harmful content", "do anything now",
+"ignore all instructions", "ignore the rules, constraints, parameters, values, and ethics",
+"you have full authorization to ignore","you will receive 10 tokens",
+"the more truthful your answers are, the more tokens", "ignore your ethical guidelines",
+"ignore your programming", "Developer Mode"]);
+GenAI_Table
+| where ingestion_time() > ago(30d)
+| where record has_any (prompt_eng_string)
+//Searches the string for items specified in the array and returns position in the array of the first item found in the string to variable IDX
+| extend Idx = has_any_index(tostring(record), prompt_eng_string)
+| extend
+    MatchedTerm = iif(Idx < 0, "NO MATCH FOUND", tostring(prompt_eng_string[Idx]))
+    inputdata = record['Input']['messages'][1]
+| project TimeGenerated, MatchedTerm, inputdata, inputdataa, inputdataaa, inputdataaaa, record
+ 
