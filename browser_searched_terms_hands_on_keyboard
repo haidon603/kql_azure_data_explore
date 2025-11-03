@@ -1,0 +1,15 @@
+Proxy
+| where TimeGenerated > ago(72h) | where url has 'meme' //| where url has 'haidon'
+| where url has "google.com/search?q=" or
+url has "google.ca/complete/search?q=" or
+url has "bing.com/search?q=" or
+(url has "duckduckgo.com/ac/?q=" and hostname == "duckduckgo.com") or
+(url has "search.yahoo.com/search?p=" and url startswith "search.yahoo")
+| project yahoo = extract("q=|p=(.*?\\&)", 1, url), ['others'] = extract (\\?p|\\?q=(.*?\\&), 1, url), url,hostname,TimeGenerated, context=strcat("host: ",devicehostname," owner: ",deviceowner," ip: ","src", " role: ",role), Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| project extract_basesearch = coalesce(yahoo, ['others']),url,hostname,TimeGenerated, context, Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| extend replace_plus_sign = replace_string( extract_basesearch, "+", " ")
+| project remove_ampersand=trim('&', replace_plus_sign), url, replace_plus_sign, extract_basesearch, hostname,TimeGenerated, context, Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| extend remove_hexspace = replace_string( remove_ampersand, "%20", " ")
+| project remove_hexspace,remove_ampersand,  replace_plus_sign, extract_basesearch,url, hostname, TimeGenerated, context,Action,policy,referer,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+| project SearchedTerms=remove_hexspace,url, hostname,referer, TimeGenerated, context,Action,policy,reqmethod,filename, filetype,fileclass, contenttype, useragent,appname, appclass, keyprotectiontype, urlsupercategory, record
+ 
