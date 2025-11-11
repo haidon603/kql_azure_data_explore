@@ -1,0 +1,37 @@
+let IPDATA = (externaldata (IPSTR:string, FIRSTSEEN:string, LASTSEEN:string)
+['https://raw.githubusercontent.com/sudesh0sudesh/ExpressVPN-IPs/refs/heads/main/express_ips.csv']
+with (ignoreFirstRecord=true,format="csv"));
+database('network').ralogs
+| where TimeGenerated > ago(30d)
+| evaluate ipv4_lookup(IPDATA, user_clientip, IPSTR, return_unmatched=false)
+| extend   ip_geo = geo_info_from_ip_address(user_clientip)
+| project  TimeGenerated,ad_last_attr_cn,bios_version, client_hostname,client_platform,
+ vpn_country = ip_geo.country, vpn_state = ip_geo.state, ad_country = user_ipgeolocation_countrycode,  
+ ad_state = user_ipgeolocation_state, user_agent, machineinfo,mb_sn, bios_sn, user_clientip
+ 
+let IPDATA = (externaldata (ENTRY:string, IPSTR:string, COUNTRY1:string, COUNTRY2:string)
+['https://raw.githubusercontent.com/mthcht/awesome-lists/refs/heads/main/Lists/VPN/ProtonVPN/protonvpn_ip_list.csv']
+with (ignoreFirstRecord=true,format="csv"));
+database('network').ralogs
+| where TimeGenerated > ago(30d)
+| where policy_inspectionhost_status == 'done'
+| evaluate ipv4_lookup(IPDATA, user_clientip, IPSTR, return_unmatched=false)
+| extend   ip_geo = geo_info_from_ip_address(user_clientip)
+| project  TimeGenerated,ad_last_attr_cn,bios_version, client_hostname,client_platform,
+ vpn_country = ip_geo.country, vpn_state = ip_geo.state, ad_country = user_ipgeolocation_countrycode,  
+ ad_state = user_ipgeolocation_state, user_agent, machineinfo,mb_sn, bios_sn, user_clientip
+ 
+let IPDATA = (externaldata (IPSTR:string, REGION:string, LASTSEEN:string)
+['https://raw.githubusercontent.com/Lars-/PIA-servers/refs/heads/master/export.csv']
+with (ignoreFirstRecord=true,format="csv"));
+database('network').ralogs
+| where TimeGenerated > ago(30d)
+| evaluate ipv4_lookup(IPDATA, user_clientip, IPSTR, return_unmatched=false)
+| extend   ip_geo = geo_info_from_ip_address(user_clientip)
+| project  TimeGenerated,ad_last_attr_cn,bios_version, client_hostname,client_platform,
+ vpn_country = ip_geo.country, vpn_state = ip_geo.state, ad_country = user_ipgeolocation_countrycode,  
+ ad_state = user_ipgeolocation_state, user_agent, machineinfo,mb_sn, bios_sn, user_clientip
+ 
+ 
+ 
+ 
