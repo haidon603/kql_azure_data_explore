@@ -1,0 +1,14 @@
+database('network').ralogs
+| where TimeGenerated > ago(30d)
+| where policy_inspectionhost_status == 'done' //only confirmed connected, could comment out to hunt for attempts to connect from VM
+| where isnotempty(ad_last_attr_cn)
+| where machineinfo.['last'].bios.version has_any ('BOCHS', 'VRTUAL', 'PRLS', 'VBOX') or machineinfo.['last'].bios.sn has 'VMWARE' or message has 'BE:EF:1E'
+| extend mb_sn = machineinfo.['last'].motherboard.sn
+| extend bios_sn = machineinfo.['last'].bios.sn
+| extend bios_version = machineinfo.['last'].bios.version
+| extend vm_platform = iif(bios_version has_any ('BOCHS', 'VRTUAL', 'PRLS', 'VBOX'), split(bios_version, ' ')[0], '')  //get a single field to identify VM Platform
+| extend vm_platform = iif(isempty(vm_platform) and bios_sn has 'VMWARE', 'VMWARE', vm_platform)
+| extend vm_platform = iif(isempty(vm_platform) and message has 'BE:EF:1E', 'BEEF1E', vm_platform)
+| where not(client_hostname startswith 'CX' and DeviceOrigin == 'Jones_Device') //drop company VDIs
+| project TimeGenerated, bios_sn, bios_version, mb_sn, client_hostname, client_platform, client_type, DeviceOrigin, server_network_name, user_agent, user_clientip, user_ipgeolocation_countrycode,user_ipgeolocation_state
+//begin allowlisting specific users and their known VM platforms
