@@ -1,0 +1,46 @@
+//KVM's are a common tool amongst remote and hybrid workers for ease of use.
+//queries usb insertion events containing kvm and then links them to username and last user role to contextualize
+    database('Endpoint').CrowdStrikeFDR //Associate Users to workstations based on Logon logs as USB events do not possess a username
+| where ingestion_time() > ago(30d)
+| where event_simpleName == 'UserLogon'
+| project    UserName = trim("a|b|c$", UserName), //remove suffixes/prefixes as appropriate to match ADTable username format
+ComputerName=ClientComputerName
+| join kind=inner
+    (
+    database('Endpoint').CrowdStrikeFDR  //Retrieve any usb insertion events where the product field contains 'kvm' //assumed threat actor uses KVM out of the box
+    | where ingestion_time() > ago(30d)
+    | where event_simpleName == "DcUsbDeviceConnected" and DeviceProduct contains "kvm"
+    )
+    on ComputerName
+| project    UserName,    ComputerName,   event_simpleName,    DeviceManufacturer,    DeviceProduct,    DevicePropertyClassName,    DevicePropertyDeviceDescription,    DevicePropertyManufacturer,    DevicePropertyFriendlyName
+| join kind = inner  
+    (
+    database('Identity').ADTable //Enrich username with AD data to understand context and role prevalence
+    | where TimeGenerated > ago(24h) //Edit as needed to reflect your organization's Identity data freshness
+    | where message == 'sync-update'   //Sync events only but modify as appropriate
+    | project
+        TimeGenerated,
+        tostring(UserName=after.['sAMAccountName']),
+        after,
+        after.['mail'],
+        after.['whenCreated'],    
+        title=after.['title'],
+        division=after.['division'],
+        after.['department'],
+        after.['lockOut'],
+        record)
+//tuning considerations    // | where division != 'Digital' and division != 'Technology'
+    on UserName
+//uncomment for 1:1 table | project ComputerName, event_simpleName, DeviceManufacturer, DeviceProduct, DevicePropertyClassName, DevicePropertyDeviceDescription, DevicePropertyManufacturer, DevicePropertyFriendlyName, title=tostring(['title']), tostring(division), UserName, whenCreated=tostring(after_whenCreated), TimeGenerated,   record
+| summarize
+    make_set(ComputerName),
+    make_set(DeviceManufacturer),
+    make_set(DeviceProduct),
+    make_set(DevicePropertyDeviceDescription),
+    make_set(DevicePropertyManufacturer),
+    make_set(record, 5)
+    by UserName, ['title'], division, whenCreated
+ 
+ 
+ 
+ 
