@@ -1,0 +1,33 @@
+//While Tenable data is primarily intended for vulnerability management, some of the plugins are helpful for threat analysis and asset contextualization.
+//https://www.tenable.com/plugins/nessus/families
+//Can complete a multi host search with | where asset_fqdn has_any ("myhost1", "myhost2", "myhost3)")
+// Comment out any uninteresting plugins with “//”
+Tenable
+| where ingestion_time() > ago(1d)
+| where state == 'OPEN' or state == 'REOPENED' //comment out to see CLOSED findings too
+| where asset_fqdn contains (host_t) //asset_fqdn has_any ("myhost1", "myhost2", "myhost3)")
+| where plugin_name == 'Windows ComputerSystemProduct Enumeration (WMI)'
+| where plugin_name == 'Microsoft Windows Logged On Users'
+| where plugin_name == 'User Download Folder Files'
+| where plugin_name == 'Recent File History'
+| where plugin_name == '7-Zip Recent Files'
+| where plugin_name == 'Adobe Recent Files'
+| where plugin_name == 'Recycle Bin Files'
+| where plugin_name == 'Microsoft Office File History'
+| where plugin_name == 'Explorer Search History'
+| where plugin_name == 'Windows Explorer Typed Paths'
+| where plugin_name == 'Microsoft Windows Mounted Devices'
+| where plugin_name == 'USB Drives Enumeration (WMI)'
+| where plugin_name == 'WMI Bluetooth Network Adapter Enumeration'
+| where plugin_name == 'Windows Wireless SSID (WMI)'
+| where plugin_name == 'Microsoft Windows Wireless Network History'
+| where plugin_name == 'Netstat Connection Information'
+| where plugin_name == 'Microsoft Windows Startup Software Enumeration'
+| where plugin_name == 'UserAssist Execution History'
+| where plugin_name == 'Terminal Services History'
+| where plugin_name == 'AI/LLM Software Report'
+| where plugin_name == 'PsExec Service Installed'
+| where plugin_name == 'Filepaths contain Dangerous characters (Windows)'
+| where plugin_name == 'Microsoft Malicious Software Removal Tool Installed'
+| where plugin_name == 'Enumerate the Microsoft Windows Registry'
+| project asset_ipv4, asset_fqdn, plugin_name, output, plugin_description, plugin_family, severity, state, last_found, ingestd_at, _raw
