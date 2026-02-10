@@ -1,0 +1,180 @@
+//searches interesting ldap strings from this article in field LdapSearchFilterSample - https://techcommunity.microsoft.com/blog/microsoftdefenderatpblog/hunting-for-reconnaissance-activities-using-ldap-search-filters/824726
+//CS Data Dictionary
+//LdapSearchBaseObjectSample An example of an LDAP search query base-object associated with a sample of one of the activities in the aggregation window. Unlike the query filter, the query base object does not aff ect the aggregation tuple.
+//LdapSearchFilterSample  A shape-only version of the LDAP search query filter associated with the activity, discarding any attribute values inlined into the filter, but retaining the logical structure, as well as the attribute names. While syntactically valid, the primary usage for the resultant filter is calculating the query-token, as well as the activity aggregation tuple.
+//hunt for high query quantity, wildcards, spns/trusts/acls, ad groups of interest, filter chaining, unusual endpoints/users initiating traffic etc.
+//added tuning so that if a username matches the username in a ldap search it is ignored. LAP is widely used by Windows for a self-lookup to resolve display name, upn, groups SID, account state etc. (e.g. user logged in, unlocked machine, launched app, accessed network resource, refreshed token, started vpn)
+let LDAP_Filter = dynamic([
+    "(&(&(objectCategory=person)(objectClass=user))(|(description=*pass*)(comment=*pass*)))", //enum_ad_user_comments (Metasploit)
+    "(&(objectCategory=computer)(operatingSystem=*server*))", //enum_ad_computers (Metasploit)
+    "(&(objectClass=group))", //enum_ad_groups (Metasploit)
+    "(&(objectClass=group)(managedBy=*))", //enum_ad_groups (Metasploit)
+    "(&(objectClass=group)(managedBy=*)(groupType:1.2.840.113556.1.4.803:=2147483648))", //enum_ad_groups (Metasploit)
+    "(&(sAMAccountType=805306369)(dnshostname=*))", //Get-NetComputer (PowerView)
+    "(&(samAccountType=805306368)(samAccountName=*)", //Get-NetUser - Users (Powerview)
+    "(&(samAccountType=805306368)(servicePrincipalName=*)", //Get-NetUser - SPNs (Powerview)
+    "(&(objectClass=msDFS-Linkv2))", //Get-DFSshareV2 (Powerview)
+    "(&(objectCategory =organizationalUnit)(name=*))", //Get-NetOU(PowerView)
+    "(samAccountType=805306368)",    //Get-DomainSearcher (Empire) //Searches for user objects 'give me all user objects
+    "ServicePrincipalName",
+    "servicePrincipalName"]);    //evidence of kerberoasting by looking for the SPN property in the query filter(consider also looking for spn in the attributes returned)
+//An account with the servicePrincipalName attribute set in AD is a service account.
+//First, the attacker enumerates all accounts that have the attribute servicePrincipalName set. Then, they request valid service tickets from the domain controller for those services. Once received, the service ticket contents are stored in memory and the hash can be dumped and cracked offline. After successfully cracking a hash, the attacker can then impersonate the service account.
+CrowdStrikeFDR
+| where ingestion_time() > ago(7d)
+| where cid == "myProd" //focus on production tenant
+| where event_simpleName == 'ActiveDirectoryIncomingLdapSearchRequest' //crowdstrike event that indicates that the Domain Controller must handle one or more LDAP search requests from an account on an endpoint.
+| extend Idx = has_any_index(LdapSearchFilterSample, LDAP_Filter) //searches the string for items specified in the array and returns the position in the array of the first item found in the string to variable IDX
+| extend MatchedTerm = iif(Idx < 0, "NO MATCH FOUND", tostring(LDAP_Filter[Idx]))
+| where Idx > 0
+| extend UserName = extract("(\\w+)@", 1, SourceAccountUserName) //extract/make field called 'UserName' from field 'SourceAccountUserName' to join with AD table field 'UserName'. regex will vary by environment
+| extend LdapReturnedAccountName = extract("samAccountName=(\\w+)", 1, LdapSearchFilterSample) //extract/make field called 'LdapReturnedAccountName' from field 'LdapSearchFilterSample' to compare looked up name with initiator i.e rule out regular OS behavior. regex will vary by environment
+| where not(
+            SourceAccountUserName has_any (
+    "sso@crunchwrap.com",
+    "sys@crunchwrap.com",
+    "phone@crunchwrap.com",
+    "vdijedi@crunchwrap.com",
+    "subpub@meh.AD.CRUNCHWRAP.COM")
+        )  //omit iam tools, service accounts, iam tools, sso, syncing, endpoint management, etc.
+| where not(
+            SourceEndpointHostName has_any ("auth.ad.crunchwrap.com", "tpm.crunchwrap.com")
+        ) //omit iam tools, service accounts, iam tools, sso, syncing, endpoint management, etc.
+| extend
+    ActiveDirectoryAuthenticationMethod
+    = case(
+      ActiveDirectoryAuthenticationMethod == "0",
+      "KERBEROS",
+      ActiveDirectoryAuthenticationMethod == "1",
+      "NTLM_V1",
+      ActiveDirectoryAuthenticationMethod == "2",
+      "NTLM_V2",
+      ActiveDirectoryAuthenticationMethod == "3",
+      "SIMPLE_BIND",
+      ActiveDirectoryAuthenticationMethod == "4",
+      "NO_AUTHENTICATION",
+      ActiveDirectoryAuthenticationMethod == "5",
+      "UNKNOWN_NTLM",
+      ActiveDirectoryAuthenticationMethod
+  ),
+    SourceAccountType
+    = case(
+      SourceAccountType == "0",
+      "User",
+      SourceAccountType == "1",
+      "Computer",
+      SourceAccountType == "2",
+      "Group",
+      SourceAccountType == "3",
+      "Cloud_Service",
+      SourceAccountType
+  ),
+    LdapSearchScope
+    = case(
+      LdapSearchScope == "0",
+      "BASE_OBJECT",
+      LdapSearchScope == "1",
+      "SINGLE_LEVEL",
+      LdapSearchScope == "2",
+      "WHOLE_SUBTREE",
+      LdapSearchScope
+  )
+| extend LdapSearchQueryClassification = toint(LdapSearchQueryClassification) //convert to integer so we can do a bitwise operation
+| extend DecodedLdapClassification = strcat  //enrich the classification field with english translation
+    (
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000001) != 0, 'SINGLE_ENTRY_QUERY;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000002) != 0, 'GROUP_MEMBERSHIP_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000004) != 0, 'ACL_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000008) != 0, 'SPN_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000010) != 0, 'TRUST_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000020) != 0, 'GPO_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000040) != 0, 'USER_ACCOUNT_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000080) != 0, 'COMPUTER_ACCOUNT_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000100) != 0, 'DOMAIN_CONTROLLER_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000200) != 0, 'GROUP_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000400) != 0, 'ORGANIZATIONAL_UNIT_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00000800) != 0, 'ALL_OBJECTS_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00001000) != 0, 'PREAUTH_NOT_REQUIRED_ACCOUNT_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00002000) != 0, 'DELEGATION_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00004000) != 0, 'ADMIN_COUNT_SET_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00008000) != 0, 'GPO_SEARCH;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00010000) != 0, 'ADCS_ENUMERATION;', ''),
+                                         iff(binary_and(LdapSearchQueryClassification, 0x00020000) != 0, 'ADCS_MISCONFIG_ENUMERATION;', '')
+                                     ) //0 indicates a Success or No Error status.
+| extend DecodedLdapClassification = split(trim_end(';', DecodedLdapClassification), ';') //cleanup field
+| project
+    TimeGenerated,
+    ComputerName,
+    SourceAccountUserName,
+    SourceEndpointHostName,
+    MatchedTerm,
+    DecodedLdapClassification,
+    ActiveDirectoryAuthenticationMethod,
+    UserName,
+    LdapReturnedAccountName=tolower(LdapReturnedAccountName), //normalize username value to prevent duplicates. data massaging will vary by environment
+    SourceAccountType,
+    LdapSearchFilterSample,
+    LdapSearchAttributes,
+    LdapSearchBaseObjectSample,
+    LdapSearchScope,
+    AggregationActivityCount,
+    event_simpleName,
+    record
+| where UserName != LdapReturnedAccountName //omit expected ldap querying (e.g. authenticate users, check permissions, and locate network resources)
+| extend UserName = extract("(^(\\w+).)", 2, UserName) //^(.*).$remove appended letter denoting elevated account since only standard AD accounts have title populated while priv accts do not//edit for env as appropriate
+| join kind = inner   //enrich username with job role
+    (
+    database('Identity').ADTable
+    | where ingestion_time() > ago(1d) //edit as needed to get fresh AD info, look back can most likely be short if table is regularly synced
+    | where message == 'sync-update' //retrieve sync events only
+    | project
+        TimeGenerated,
+        tostring(UserName=after.['sAMAccountName']),
+        after.['whenCreated'],
+        title=after.['title'],
+        division=after.['division'],
+        record
+    //consider tuning users who have roles requiring regular LDAP querying or authorized to mass query ldap | where division != 'Digital' and division != 'Technology'
+    )
+    on UserName
+| project
+    TimeGenerated,
+    DC_Queried=ComputerName,
+    SourceEndpointHostName,
+    SourceAccountUserName,
+    DecodedLdapClassification,
+    MatchedTerm,
+    ActiveDirectoryAuthenticationMethod,
+    UserName,
+    LdapReturnedAccountName,
+    SourceAccountType,
+    LdapSearchFilterSample,
+    LdapSearchAttributes,
+    LdapSearchScope,
+    LdapSearchBaseObjectSample,
+    AggregationActivityCount,
+    division,
+    ['title'],
+    after_whenCreated,
+    record
+| summarize
+    ldap_src_username=make_set(SourceAccountUserName),  
+    div=make_set(division),
+    title=make_set(['title']),    
+    account_created=make_set(['after_whenCreated']),
+    aggregation_count =  sum(toint(AggregationActivityCount)), //sum up the aggregation count by UserName
+    ad_auth=make_set(ActiveDirectoryAuthenticationMethod),
+    initating_host=make_set(tolower(SourceEndpointHostName)), //normalize field value to de-duplicate
+    dc_queried=make_set(DC_Queried),
+    search_scope=make_set(LdapSearchScope),
+    ldap_classification=make_set(DecodedLdapClassification),
+    matched_term=make_set(MatchedTerm),
+    filter_sample=make_set(LdapSearchFilterSample),
+    search_base_obj_sample=make_set(LdapSearchBaseObjectSample),
+    //make_set(LdapSearchAttributes), //uncomment to examine tuple
+    //make_list(AggregationActivityCount), // uncomment to verify sum is accurate
+    make_set(TimeGenerated, 5), //only pull 5 timestamps
+    make_set(record, 2) //only pull 2 raw logs
+    by SourceAccountType, UserName//uncomment for unit test// LdapReturnedAccountName //LdapReturnedAccountName should always be  empty and/or NOT match the initiating username
+| where aggregation_count > 2 //comment out to hunt stealthy queries. in most environments 1 query to 1 user is benign IF said user is the initiator and the requested ldap username
+ 
