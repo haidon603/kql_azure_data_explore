@@ -1,0 +1,33 @@
+// The Lowest-Tech Homoglyph That Won’t Die: How ‘rn’ Still Masquerades as ‘m’
+// https://www.netcraft.com/blog/the-lowest-tech-homoglyph-that-wont-die
+Proxy
+| where ingestion_time() > ago(1d)
+| where   (not(realm has_any ('guest','edge')) and not(usrName has 'guest')) and not(usrName hassuffix 'wifi') //filter as appropriate for your environment
+| where url has_any ("rnicrosoft",
+"rnastercard",
+"login.aviatornastercard",
+"rnastercard-financial",
+"rnastercards",
+"rnedicare",
+"yournedicaresolutions",
+"rnoganstanley",
+"rnozilla",
+"rnarriott-sp",
+"rnarriottinternational",
+"rnarriotthotel",
+"jwrnarriott",
+"rnagento",
+"rnassmutual",
+"rnercedesbenz",
+"rnercedes",
+"rnoderna",
+"rnodernaproducts",
+"rnarcusbygoldmansachs",
+"rnarcustheatres",
+"rnotorolasolutlons",
+"rnotorola")
+| project TimeGenerated,Action, urlcategory, url, referer, devicehostname, record //use a summarize as needed
+ 
+ 
+ 
+ 
