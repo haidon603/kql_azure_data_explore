@@ -1,0 +1,31 @@
+//Kusto Query Language for reviewing traffic as it may pertain to Iran
+EDR
+| where TimeGenerated > ago(30d)  
+| where FileName matches regex @"[\u0590-\u05FF]" //Hebrew Unicode block
+| project-reorder event_platform,event_simpleName, FileName, ContextBaseFileName,TargetFileName;
+EDR
+| where TimeGenerated > ago(30d)
+| where event_simpleName == "MacroContentInfo" or event_simpleName == "MacroDetectInfo"
+| where ScriptContent matches regex @"[\u0590-\u05FF]" or ScriptContent has ".ir";
+EDR
+| where TimeGenerated > ago(30d)  
+| search '.rar' and '.pdf.lnk'
+| project-reorder event_platform,event_simpleName, FileName, ContextBaseFileName,TargetFileName;
+Proxy
+| where TimeGenerated > ago(30d)
+| where filename matches regex @"[\u0590-\u05FF]" or hostname endswith ".ir" or filename endswith '.rar'
+| project-reorder filename, fileclass,url, action;
+EMAIL
+| where TimeGenerated > ago(30d)
+| where record.filename matches regex @"[\u0590-\u05FF]"
+ 
+let CIDRASN = (externaldata (CIDR:string, CIDRASN:int, CIDRASNName:string)
+['https://firewalliplists.gypthecat.com/lists/kusto/kusto-cidr-asn.csv.zip']
+with (ignoreFirstRecord=true));
+VPN
+| where TimeGenerated > ago(30d)  
+| where isnotempty(user_ipgeolocation_countrycode)
+| where user_ipgeolocation_countrycode == "IR"
+| evaluate ipv4_lookup(CIDRASN,user_clientip, CIDR, return_unmatched=true)
+ 
+ 
