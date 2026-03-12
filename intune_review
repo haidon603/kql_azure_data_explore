@@ -1,0 +1,113 @@
+//Use Proxy logs to hunt for Intune authentications
+database('Network').table('proxy')
+| where TimeGenerated between (_startTime.._endTime)  
+| where referer has 'intune.microsoft.com' and hostname has 'login.microsoftonline.com'
+| summarize c=count() by user,tostring(record.department), bin(TimeGenerated, 12h)
+| sort by c desc | take 15
+//| where url has 'TenantAdminMenu' or url has 'Microsoft_Intune_DeviceSettings'
+//'https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/TenantAdminMenu/~/tenantStatus'
+ 
+ 
+//Query for device deletion and wipes //Enrich with IP data to determie geolocation/ASN
+database('Identity').table('EntraIDAudit')
+| where TimeGenerated between (_startTime.._endTime)  
+| extend InitiatedByUser = tostring(parse_json(InitiatedBy).user.userPrincipalName), InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName),device= tostring(parse_json(TargetResources).[0].displayName),  IPAddress = tostring(parse_json(InitiatedBy).user.ipAddress)
+| where ActivityDisplayName has "wipe ManagedDevice" or ActivityDisplayName has "Delete device"
+| where InitiatedBy has "user" and InitiatedBy !has "Sync_" //Ignore normal syncing
+| extend GeoIPInfo = geo_info_from_ip_address(IPAddress)
+| extend country = tostring(parse_json(GeoIPInfo).country), state = tostring(parse_json(GeoIPInfo).state)
+| summarize count=count() by ActivityDisplayName, tostring(InitiatedByUser), IPAddress,country,state, device, bin(TimeGenerated, 1h)
+| take 20
+ 
+//Query for new Device Registrations to Intune
+database('Identity').table('EntraIDAudit')
+| where TimeGenerated between (_startTime.._endTime)  
+| where Category == 'Device' and ActivityDisplayName == 'Add device' //Intune Device Registration //For BYOD actions use "Register device" which shows personal device with a work account
+//| where Identity == 'Device Registration Service'
+| extend InitiatedByUser = tostring(parse_json(InitiatedBy).user.userPrincipalName), InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName),
+device= tostring(parse_json(TargetResources).[0].displayName),  IPAddress = tostring(parse_json(InitiatedBy).user.ipAddress),
+CloudDeviceOSType  = tostring(parse_json(TargetResources)[0].modifiedProperties.[2].newValue)// Extraction says within TargetResources, go to position 0, then from modified properties count 2 within the array and retrieve the 'newValue'. Name this 'CloudDeviceOSType
+| where device !startswith "yourscheme"  and device !startswith "ascheme"
+//Uncomment to get line by line | project-reorder TimeGenerated, ActivityDisplayName, CloudDeviceOSType, device, Identity
+| summarize c=count(),  make_set(device), make_set(TimeGenerated,5) by ActivityDisplayName, CloudDeviceOSType
+| sort by c asc
+ 
+//Intune Admin activities outside of standard hours
+database('Identity').table('EntraIDAudit')
+| where TimeGenerated between (_startTime.._endTime)  
+| extend Hour = hourofday(TimeGenerated), DayOfWeek = dayofweek(TimeGenerated)
+| where DayOfWeek == 0 or DayOfWeek == 6 // Saturday or Sunday
+ or Hour < 7 or Hour >= 19 // Outside 7am-7pm
+| where AADOperationType == "Update" or AADOperationType == "Create"
+| extend InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName) ,ip = tostring(parse_json(InitiatedBy).user.ipAddress)
+| where InitiatedByUPN endswith "hi@myadmin.yo" //your admin naming here
+| where  LoggedByService != 'PIM' and LoggedByService != "Self-service Group Management" //https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-audit-activities
+| extend GeoIPInfo = geo_info_from_ip_address(ip)
+| extend country = tostring(parse_json(GeoIPInfo).country), state = tostring(parse_json(GeoIPInfo).state)
+| project-reorder InitiatedByUPN, ActivityDisplayName, LoggedByService, Result, ip, country,state
+ 
+ 
+//Query users mass accessing Intune related documentation
+database('Application').table('O365Audit')
+| where TimeGenerated between (_startTime.._endTime)  
+| where SourceFileName has 'intune'
+| where OfficeWorkload != 'Exchange'
+| where UserId != "app@sharepoint"
+| summarize c=count(), make_set(Operation), make_set(SourceFileName), make_set(SourceRelativeUrl) by tostring(UserId), bin(TimeGenerated, 8h)
+| where c > 5 //Retrieve when 1 user accesses more than 10 Intune docs within 8 hours Edit as needed
+| sort by c desc
+
+//Using stored_query_result function create a list of Intune Admins working outside of business hours and then query those admins to observe what actions ensued
+//Note: It is very common for changes to occur after hours . . . Consider modifying to look for changes outside of your org's approved change window(s)
+//Stored query results persist for only 24 hours
+.set stored_query_result 7Days_After_Hours_PIM_Elevation <|
+database('Identity').table('EntraIDAudit')
+| where TimeGenerated > ago(7d)
+| extend Hour = hourofday(TimeGenerated), DayOfWeek = dayofweek(TimeGenerated)
+| where DayOfWeek == 0 or DayOfWeek == 6 // Saturday or Sunday
+ or Hour < 7 or Hour >= 19 // Outside 7am-7pm
+| where AADOperationType == "Create" // == 'Read' //Consider hunting even Read actions outside of normal work hours
+| extend InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName), Target= tostring(parse_json(TargetResources).[0].displayName) //These audit logs use a messy data structure so need to extract relevant fields from the JSON
+| where Target == 'Intune Administrator' //Focused on MDM
+| where ActivityDisplayName != "Remove member from role (PIM activation expired)" //Disregard PIM expiration
+//Uncomment this to test time calcs for hour and day of week; query tested and worked for UTC //| project-reorder Hour,DayOfWeek,TimeGenerated, InitiatedByUser, InitiatedByUPN, AADOperationType, Target, ActivityDateTime, ResultReason
+| summarize by tostring(InitiatedByUPN) //To avoid duplicate searches only retrieve and group by usernames
+//use a semi colon to run these searches concurrently and present 2 tables. One for the base search and one for the Join
+let 7Days_After_Hours_PIM_Elevation= stored_query_result("7Days_After_Hours_PIM_Elevation"); //Assign stored query as a variable
+database('Identity').table('EntraIDAudit')
+| where TimeGenerated > ago(7d)
+| extend Hour = hourofday(TimeGenerated), DayOfWeek = dayofweek(TimeGenerated)
+| where DayOfWeek == 0 or DayOfWeek == 6 // Saturday or Sunday
+ or Hour < 7 or Hour >= 19 // Outside 7am-7pm
+| where AADOperationType == "Update" or AADOperationType == "Create"
+| extend InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName),InitiatedBySPN = tostring(parse_json(InitiatedBy).app.displayName)
+| where InitiatedBy !has "Sync_"  //Ignore normal syncing
+| project-reorder InitiatedByUPN,InitiatedBySPN,ResultReason, ActivityDisplayName, LoggedByService, Result
+| join kind=inner  7Days_After_Hours_PIM_Elevation on InitiatedByUPN //Join with stored query on username
+ 
+ 
+//Priv or Service account seen in Entra ID Risk detections
+database('Identity').table('EntraIDUserRiskEvents')
+| where TimeGenerated between (_startTime.._endTime)  
+| where RiskDetail == "none" //none here translates to an admin hasn't dismissed this yet and/or AI/ML dismissed values
+| where UserDisplayName has_any ("Generic", "Privileged")
+    or UserPrincipalName endswith "myadmin@scheme.yo"//targeting generic or privileged accounts
+| extend AdditionalInfoParsed = parse_json(AdditionalInfo)
+| mv-expand RiskEntry = AdditionalInfoParsed
+| where RiskEntry.Key == "riskReasons"
+| extend RiskReasons = RiskEntry.Value
+| mv-expand RiskReason = RiskReasons
+| project
+    TimeGenerated,
+    DetectedDateTime,
+    OperationName,
+    RiskEventType,
+    RiskDetail,
+    UserPrincipalName,
+    UserDisplayName,
+    CorrelationId,
+    TokenIssuerType,
+    RiskReason,
+    IpAddress | take 20
+ 
+ 
