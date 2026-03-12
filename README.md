@@ -3,6 +3,12 @@ KQL Queries to aid in security investigations within Azure Data Explorer. Consid
 Join EDR DNS events with Proxy events to determine if the request was allowed.
 ![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/kql_join.png)
 
+Intune Analysis
+![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/intune1png)
+![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/intune2.png)
+![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/intune3.png)
+
+
 Search an IoC across all databases in the cluster.
 ![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/IoC_Landing_Page.png)
 
