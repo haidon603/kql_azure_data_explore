@@ -1,0 +1,42 @@
+//add and update actions affecting highly privileged roles or sensitive identity objects
+database('Identity').table('MicrosoftEntraIDAudit')
+| where TimeGenerated > ago(90d)
+//| where ActivityDisplayName =="Add eligible member to role in PIM completed (permanent)" or ActivityDisplayName == "Add member to role in PIM completed (timebound)" or ActivityDisplayName == "Add member to role requested (PIM activation)"
+| where ActivityDisplayName startswith "Add" or ActivityDisplayName startswith "Update" or ActivityDisplayName startswith "User" or ActivityDisplayName startswith "Device" or ActivityDisplayName startswith "Process"
+| extend InitiatedByUser = tostring(parse_json(InitiatedBy).user.userPrincipalName), InitiatedByUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName),
+Target= tostring(parse_json(TargetResources).[0].displayName)//, IPAddress = tostring(parse_json(InitiatedBy).user.ipAddress)
+| where Target contains 'Global' or Target  endswith 'Administrator' or  Target  contains 'root'
+| project-reorder TimeGenerated, InitiatedByUser, InitiatedByUPN, AADOperationType, Target, ActivityDateTime, ResultReason
+| summarize count(Target), make_set(Target), make_set(ActivityDisplayName), make_set(ResultReason), make_set(P,5) by InitiatedByUser
+ 
+ 
+//New user and sensitive role combinations seen in the last 7 days but not in the last 6 months
+let baseline= //First establish baseline
+    database('Identity').table('EntraIDAudit')
+    | where TimeGenerated between (ago(180d) .. ago(7d)) //Search last 6 months but ignore the last 7 days
+    | where ActivityDisplayName startswith "Add" or ActivityDisplayName startswith "Update"  or ActivityDisplayName startswith "User" or ActivityDisplayName startswith "Device" or ActivityDisplayName startswith "Process"
+    | extend InitiatedByUser = tostring(parse_json(InitiatedBy).user.userPrincipalName),   Target= tostring(parse_json(TargetResources).[0].displayName)
+    | where Target contains 'Global' or Target endswith 'Administrator' or Target contains 'root' //Look for high priv groups only
+    | project User_Role=(strcat(InitiatedByUser, " - ", Target)) //For purposes of a join this concatenates user and name of the role
+    | summarize by User_Role; //Summarize to deduplicate. Semi-colon says run this and the next query at the same time
+let recent = //Second establish recent activity //Query verbatim as above except we are adding fields for context: ActivityDisplayName, ResultReason, TimeGenerated
+    database('Identity').table('EntraIDAudit')
+    | where TimeGenerated > ago(7d) //last 7 days
+    | where ActivityDisplayName startswith "Add" or ActivityDisplayName startswith "Update"  or ActivityDisplayName startswith "User" or ActivityDisplayName startswith "Device" or ActivityDisplayName startswith "Process"
+    | extend InitiatedByUser = tostring(parse_json(InitiatedBy).user.userPrincipalName),   Target= tostring(parse_json(TargetResources).[0].displayName)
+    //| where isnotempty(InitiatedByUser) //Uncomment to omit automated activity
+    | where Target contains 'Global' or Target endswith 'Administrator' or Target contains 'root'
+    | project User_Role=(strcat(InitiatedByUser, " - ", Target)),Target, ActivityDisplayName,ResultReason,TimeGenerated
+    | summarize by User_Role,Target, ActivityDisplayName, ResultReason, TimeGenerated;
+baseline //Use the table titled baseline as left table
+| join kind=rightanti recent on User_Role //right anti-join returns only the rows from the recent table that have no matching, corresponding rows in the baseline table i.e new user role combinations
+| project User = (extract("(\\w+)",0,User_Role)),Target, User_Role, ResultReason,TimeGenerated //Extract username from domain and title so that we can group roles by username for enhanced analysis otherwise we will have something like 'myadmin@domain.com - Intune Administrator'
+| summarize
+    count(Target),
+    make_set(Target),
+    make_set(ResultReason),
+    make_set(TimeGenerated)
+    by User //Right outer join means find all matching records for column useragent from table 'baseline' in table 'new' and also return all user agents from the 'new' table e.g. user agents seen in last 14 days but not seen in last 180 days
+ 
+ 
+ 
