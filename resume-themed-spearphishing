@@ -1,0 +1,46 @@
+//www.aryaka.com/docs/reports/blacksanta-edr-killer-threat-report.pdf
+//Celine_Pesant.iso, used a resume-style filename resembling a real person’s name,
+//Upon mounting, the ISO contained four files: Celine_Pesant.pdf.lnk, image1.png, script.ps1, and wintes.ico.
+//The PDF-themed file is actually a Windows shortcut (.lnk) rather than a legitimate document. Alongside it, a PowerShell script and an image indicate a deliberately staged execution chain, designed to trigger further malicious activity once the shortcut is executed.
+//Upon execution, Celine_Pesant.pdf.lnk runs a Windows shortcut configured to launch cmd.exe from the System32 directory. It executes an obfuscated command that dynamically constructs
+//and launches PowerShell.exe with hidden window settings and execution policy bypass enabled. This command ultimately runs script.ps1 from within the mounted ISO
+ 
+//File name contains 'resume' but has an interesting extension
+CrowdStrike
+| where TimeGenerated > ago(30d)
+//| where event_simpleName == "IsoExtensionFileWritten" or event_simpleName == "DirectoryCreate" or event_simpleName == 'FileOpenInfo' or event_simpleName == 'FileCreateInfo'
+|where (FileName contains "resume" and (FileName endswith ".iso" or FileName endswith ".zip" or FileName endswith ".lnk")) //Uncomment this for precision and FP reduction, but more compute // FileName matches regex ".*resume.*\\.iso"
+//| where ContextBaseFileName == "msedge.exe"  or ContextBaseFileName == "chrome.exe" or ContextBaseFileName == "firefox.exe" //Uncomment for files from a web browser
+| where TargetFileName !contains "\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\" and TargetFileName !contains "\\AppData\\Roaming\\Microsoft\\Office\\Recent\\"  and
+TargetFileName !contains "\\AppData\\Roaming\\Microsoft\\Word\\" and TargetFileName !contains "\\AppData\\Roaming\\Microsoft\\PowerPoint" and TargetFileName !contains "\\AppData\\Roaming\\Microsoft\\Excel"  //Omit recently opened files as Windows auto creates .lnk files
+| summarize  count(event_simpleName),count(FileName), make_set(ComputerName), make_set(ContextImageFileName,10), make_set(CommandLine,5), make_set(TargetFileName,10), make_set(TimeGenerated, 5), make_set(record, 10) by event_simpleName,FileName
+| sort by count_event_simpleName asc
+
+//Script Executions from removable drive(s) e.g. iso
+CrowdStrike
+| where TimeGenerated > ago(90d)
+| where event_simpleName == "ProcessRollup2"and CommandLine matches regex @"^[D-Z]:\\" and (isempty(ParentBaseFileName) or ParentBaseFileName =~ "powershell.exe"  or ParentBaseFileName =~ "cmd.exe"  or ParentBaseFileName =~ "setup.exe"  or ParentBaseFileName =~ "RemoteExecService.exe" )
+| where CommandLine !has "my" and  ComputerName != "mysccm" and  ComputerName  !contains "myweb" //Add your filters to tune out legitimate IT activity
+| summarize  count(FileName), make_set(CommandLine,7), make_set(record,5) by ParentBaseFileName, FileName, ComputerName
+| sort by count_FileName asc
+
+//Hunt for files titled 'resume' but are not expected file formats.
+//Note: Expect FPs for sys admin files containing 'resume', consider tuning out by role name in favor or negate HR and IT
+database('Network').table('proxy')
+| where TimeGenerated > ago(180d)
+| where action == "Allowed"
+| where filename contains "resume" and (filename endswith ".iso" or filename endswith ".zip")
+| where fileclass != 'Images' and fileclass != 'Audio' and fileclass != 'Video'
+| where  filename !endswith ".doc" and filename!endswith ".docx" and filename !endswith ".pdf"   and filename !endswith ".png"   and filename !endswith ".jpg" and filename !endswith ".ico" and filename !endswith ".webp" and filename !endswith ".avif" and filename !endswith ".ttf"   and filename !endswith ".svc"   and filename !endswith ".txt" and filename !endswith ".svg" and filename !endswith ".json" //
+| where hostname != "my.sharepoint.com" and  hostname != "a.sharepoint.com"
+| summarize count(filename), make_set(hostname), make_set(url),make_set(urlcategory), make_set(df_hostname), make_set(fileclass), make_set(referer), make_set(record.department), make_set(useragent), make_set(record, 5) by filename
+| sort by count_filename asc nulls first
+ 
+//Hunt for files containing the string 'Resume' but are a .iso or .zip
+database('Network').table('proxy')
+| where TimeGenerated > ago(180d)
+| where action == "Allowed"
+| where (filename contains "resume" and filename endswith ".zip") or  filename matches regex ".*resume.*\\.iso"
+| summarize count(filename), make_set(hostname), make_set(url),make_set(urlcategory), make_set(df_hostname), make_set(fileclass), make_set(referer), make_set(record.department), make_set(useragent), make_set(record, 5) by filename
+| sort by count_filename asc nulls first
+ 
