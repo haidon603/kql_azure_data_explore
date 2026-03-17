@@ -20,5 +20,12 @@ User Agent Analysis for potential password spraying. Notice anything abnormal ab
 ![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/ADX_dashboard_User_Agent_Analysis_for_Password_Spraying_1.png)
 
 
+Execution from removable hard drives
+![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/execution_removable_hd.png)
+
+Changes to sensitive Entra objects. New user and role combinations seen in the last 7 days but not in the last 6 months
+![Alt text](https://github.com/haidon603/kql_azure_data_explore/blob/main/sensitive_entra_objects.png)
+
+
 
 
