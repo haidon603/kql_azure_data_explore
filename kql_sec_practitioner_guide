@@ -1,0 +1,426 @@
+//-------------------------------------Kusto Security Practitioner Guide-----------------------------------------
+// This is a guide for security practitioners on commonly used functions/operators within the Kusto Query Language (KQL).
+// tl;dr azure data searching
+// Data stored in extents > Data gets distributed across systems. > Each system is called an extent. Each extent is a time bucket.  Extents are indexed rather than looking for a string in an entire index
+// Data is stored in extents (immutable, time-bucketed).
+// Kusto uses tokenization (the process of splitting text strings, such as logs/unstructured messages, into individual components)
+// Queries scan extents, not “indexes” like Splunk.
+// Tokenized operators (has/has_any) use term indexes.
+// String-based operators (contains/search) force scans.
+ 
+//-------------------------------------Kusto Practitioner Guide Index-----------------------------------------
+//1. Shortcuts
+//2. Query Design Template
+//3. String Searching
+//4. Time Searching
+//5. Networking
+//6. Hunting
+//7. Engineering
+//8. Field Manipulation/Extraction
+//9. Query queries ran against ADX from a Table named ADXQuery
+//10. Timezones/Dashboards/Parameters
+//11. Engineering ETL adding new columns
+ 
+//-------------------------------------Shortcuts-----------------------------------------
+//Format pretty             Shift+Alt+F
+//Copy Result into Query    Ctrl+Shift+Space
+ 
+//-------------------------------------Query Design Template-----------------------------------------
+// Always filter by TimeGenerated FIRST to reduce extents scanned. When possible, use 'take' to limit returned logs.
+Table | where TimeGenerated > ago(1d) | where FieldName == "your search here"
+ 
+//-------------------------------------String Searching-----------------------------------------
+//Performance Cost Ranking
+// fastest (uses indexes)
+// ==, !=, has, has_any, startswith, endswith
+//
+// medium
+// contains, regex extract
+//
+// slower/avoid
+// search *, where * has, regex
+ 
+//MS has docs on useful operators like make_set,startswith,isnotempty,hash_sha256,base64_decode_tostring, endswith,strlen, !contains, ipv4_is_private
+//https://learn.microsoft.com/en-us/kusto/query/
+ 
+// case sensitive
+Table | where name == "Foo"
+// case sensitive
+Table | where name != "Foo"
+// not case sensitive
+Table | where name =~ "foo"
+// not case sensitive
+Table | where name !~ "foo"
+ 
+//Case In-Sensitive
+// OPERATOR       |            DESCRIPTION                            |       EXAMPLE (YIELDS TRUE)
+// =~             |   Case-insensitive exact match                    |   "Trojan.exe" =~ “trojan.EXE”
+// contains       |    Substring match, case-insensitive              |     "DownloadTrojan.exe" contains “trojan”
+// has            |     Term match, case-insensitive                  |    "Error: Access Denied" has “denied”
+// startswith     |  Starts with substring, case-insensitive          |     "malicious_payload.exe" startswith "Malicious"
+// endswith       | Ends with a specified substring, case-insensitive |   "malware.exe" endswith “Exe”
+ 
+//Case sensitive (Case-sensitive operations are typically preferred, as they require less processing)
+// OPERATOR      |         DESCRIPTION                         |  EXAMPLE (YIELDS TRUE)
+// ==            |         Exact match                         |  "admin" == "admin"
+// contains_cs   |    Substring match, case-sensitive          |  "MalwareFile.exe" contains_cs “File”
+// has_cs        |    Term match, case-sensitive               |      "Failed: Login Attempt" has_cs “Failed”
+// startswith_cs |       Starts with substring, case-sensitive |         "Malware.exe" startswith_cs “Mal”
+// endswith_cs   |    Case-sensitive end with substring        |  "DataReport.PDF" endswith_cs "PDF"
+ 
+// 'Contains' or 'search' is like *search* are VERY computationally expensive
+//Prefer to use a single search operator over several consecutive search operators
+//yay
+search "file" and ("written" or "deleted")
+//nay
+search "file" | search "written" or "deleted"
+//avooid
+search * | where * has "file" and * has "written"
+ 
+//-------------------------------------Time Searching-----------------------------------------
+ 
+//ago() Subtracts the given timespan from the current UTC time
+Table | where TimeGenerated > ago(7d)  // now subtract 7 days
+// ingestion_time returns the approximate datetime in UTC format, indicating when the record was ingested and stored in Azure
+Table | where ingestion_time() > ago(7d)  
+ 
+//Search for a specific date in UTC format.  datetime(year.month.day)
+Table | where TimeGenerated >= datetime(2026-01-01)
+//A date and time in UTC format.    datetime(year.month.day hour:minute:second.milliseconds)
+Table | where TimeGenerated >= datetime(2026-01-01 23:59:59.9)  
+ 
+//Search a range. 'between' can operate on any numeric, datetime, or timespan expression. | where field between (leftRange..rightRange) i.e. column >= A and column <= B
+Table | where TimeGenerated between (datetime(2026-01-01) .. datetime(2026-02-01))
+ 
+//Group events into time bins
+Table | summarizeEventCount = count() bybin(StartTime, 7d)
+ 
+// Group events by day
+Table | summarize Count = countif(name=="Alice" and status=="Failure") by bin(TimeGenerated, 1d)
+ 
+//Set threshold for more than 30 events in a 1-minute bucket
+Table | summarize NumRecords=count() by bin (TimeGenerated, 1m) | where NumRecords >= 30
+ 
+//-------------------------------------Networking-----------------------------------------
+Network | where not(ipv4_is_private(LocalAddressIP4))
+ 
+Network | where ingestion_time() > ago(3d)
+    and ipv4_is_in_range(RemoteAddressIP4, "10.0.0.0/8") == false
+    and ipv4_is_in_range(RemoteAddressIP4, "192.168.0.0/16") == false
+    and ipv4_is_in_range(RemoteAddressIP4, "172.16.0.0/12") == false
+ 
+Network | where ipv4_is_in_range(src, "10.0.0.0/8") //Search for internal device trying to go out to this IP range
+ 
+//Geo info from IP
+Network | extend     geo_info_from_ip_address(RemoteAddressIP4)
+| extend country = tostring(IPGeo.country)
+| extend city = tostring(IPGeo.city)
+ 
+//-------------------------------------Hunting-----------------------------------------
+ 
+//Search activity outside of business hours
+Table | extend Hour = hourofday(TimeGenerated), DayOfWeek = dayofweek(TimeGenerated)
+| where DayOfWeek == 0 or DayOfWeek == 6 // Saturday or Sunday
+ or Hour < 7 or Hour >= 19 // Outside 7am-7pm
+ 
+//Search last 6 months but ignore the last 14 days
+Table | where TimeGenerated between (ago(180d) .. ago(14d))
+ 
+// Create a query to show login and logout times for all accounts
+let login = WindowsEvents
+| where TimeGenerated > ago(30d)
+| where EventID == '4624' and TargetUserName == 'myacct'
+| project TargetUserName, TargetLogonId, loginTime = TimeGenerated;
+let logout = WindowsEvents
+| where TimeGenerated > ago(30d)
+| where EventID == '4634'  and TargetUserName == 'myacct'
+| project TargetUserName, TargetLogonId, logoutTime = TimeGenerated;
+login //login result set (variable above) used to join with logout
+| join kind=leftouter logout on TargetLogonId //join with TargetLongID
+| project TargetUserName,TargetLogonId, loginTime, logoutTime
+ 
+//search ioc in 2 tables (must be in the same database)
+search in (table1 , table2) "IoC"
+ 
+//Join 2 tables to find which process made a DNS request
+EDR | where ingestion_time() >= ago(6h)
+| where event_simpleName == 'DnsRequest'
+| where DomainName has 'bad.site'
+| project DomainName,ContextProcessId, ContextBaseFileName
+| project-rename TargetProcessId=ContextProcessId
+| join
+(EDR | where ingestion_time() >= ago(6h)
+| where event_simpleName == 'ProcessRollup2'
+| project TargetProcessId, SourceProcessId, CommandLine,ImageFileName)
+on TargetProcessId
+| summarize count() by ContextBaseFileName, tostring(DomainName)
+ 
+//Join 3 tables - search for hostnames belonging to IT HelpDesk that also have security alerts
+let test =
+FileCreationEvents
+| search "ransom.txt"
+| distinct hostname;
+let it_staff=
+Employees
+| where hostname in (test) and role == "IT Helpdesk"
+| distinct hostname;
+SecurityAlerts
+| where description has_any (it_staff)
+ 
+//The union operator supports wildcards to union multiple tables.
+// Join 3 tables
+WindowsFirewallLogs | union Events, ThreatIntel
+ 
+//The following KQL will create a count for the rows in all tables with names that start with Security.
+union Security* | summarize count() by Type
+let query1 = R_CL
+    | where isnotempty(SrcIP_s)
+    | project Message
+    | take 1;
+let query2 = R_CL
+    | where isempty(SrcIP_s)
+    | project Message
+    | take 1;
+query1
+| union query2;
+ 
+//Search list of terms and return match, and specify what the matched term is in a new column
+//Search terms here
+let SearchTerm = dynamic(["8.8.8.8", "1.2.3.4", "127.0.0.1"]);
+//Create Sample Table
+let Events = datatable(LogID:string, RawLog:string)['log1',"google dns 8.8.8.8", 'log2', "some numbers 1.2.3.4", 'log3', "Nothing here!!", 'log4', "1.2.3.4 and 127.0.0.1"];
+Events //Call Table
+| extend Idx = has_any_index(RawLog, SearchTerm) //Searches the string for items specified in the array and returns the position in the array of the first item found in the string to variable IDX
+| extend MatchedTerm = iif(Idx<0, "NO MATCH FOUND", tostring(SearchTerm[Idx]))
+| project LogID, RawLog, MatchedTerm
+ 
+//Potential Exfil
+Table | where TimeGenerated > ago(1d)  
+| where reqmethod has_any ("POST", "PUT") and Action == 'Allowed'
+| where   (not(realm has_any ('guest','edge')) and not(usrName has 'guest')) and not(usrName hassuffix 'wifi')
+| where urlcategory != "Mgmt_Updates"
+| summarize make_set(url),make_set(useragent), kbytesPerDay = sum(srcBytes/1024) by deviceowner, bin(TimeGenerated,1d)
+| extend sus = iff(kbytesPerDay  > 1000, "Potential Exfil", "BAU")
+ 
+//Use external data to enrich
+let CIDRASN = (externaldata (CIDR: string, CIDRASN: int, CIDRASNName: string)
+    ['https://firewalliplists.gypthecat.com/lists/kusto/kusto-cidr-asn.csv.zip']
+    with (ignoreFirstRecord=true));
+Table | where TimeGenerated >= ago(30d)
+| evaluate ipv4_lookup(CIDRASN, IpAddress, CIDR, return_unmatched=true)
+ 
+//Search every table in a database for an IoC
+let term_t = '';
+let findSourceIPLogs = (arg0: string, arg1: string) {
+    union withsource=_TableName *  
+  | where TimeGenerated >= ago(30d)
+};
+findSourceIPLogs("Application", ("term_t"))
+| where record contains (term_t) or P contains (term_t) // some Application table logs do not contain a 'record' column //Swap database for your database name
+| take 500 //For purposes of query efficiency, ONLY 500 RANDOM LOGS ARE RETRIEVED. This means: The absence of logs does NOT necessarily imply the term is absent in our logs. The presence of the term in some tables but not others does NOT mean the term is not also present in other tables.
+| summarize
+    make_set(record, 500),
+    make_set(P, 500),
+    dcount(tostring(record)),
+    dcount(tostring(P)),
+    make_set(ingestion_time(), 500)
+    by _TableName
+| sort by dcount_record
+ 
+//-------------------------------------Engineering-----------------------------------------
+.show database Network kqlschema
+.show databases schema
+.show table CrowdStrikeFDR
+.show tables  
+.show commands-and-queries //only maintained for 30 days
+.show queries | where StartedOn >= ago(4d) //show queries
+Table | sample 100 //sample 100 random logs
+ 
+//retrieve 5 newest logs
+Table | top 5 by TimeGenerated
+ 
+//Retrieve Oldest/Recent log, groups all rows by ruleSubCategory
+Table | summarize first_seen_timeGenerated = arg_min(TimeGenerated,*), last_seen_timeGenerated = arg_max(TimeGenerated,*)   by ruleSubCategory
+ 
+//Find earliest() and latest max() event by TimeGenerated
+Table | summarize min(TimeGenerated), max(TimeGenerated)
+ 
+//Convert TimeGenerated to string and shift it to CST/PST
+Table | extend CentralTime = format_datetime((TimeGenerated-6h), 'M/d/y h:mm:s tt')
+Table | extend PacificTime = format_datetime((TimeGenerated-7h), 'M/d/y h:mm:s tt')  
+ 
+//compare time of event logged by console vs time event ingested into SIEM
+Table | extend ingestionTime = ingestion_time()| take 10 | project  ingestionTime, TimeGenerated
+ 
+//Calculate lag
+Table | where ingestion_time() >= ago (4h)
+| extend ingest_time = ingestion_time()
+| extend lag = ingest_time - TimeGenerated
+| project TimeGenerated, ingest_time, lag
+ 
+//Average time to ingest and longest time
+Table | where ingestion_time() >= ago(6h)
+| extend Delay = ingestion_time() - TimeGenerated
+| summarize avg(Delay), max(Delay)
+ 
+//Count logs ingested by hour
+Table | where ingestion_time() >= ago (6h)
+| summarize count() by bin(TimeGenerated, 1h)
+| render barchart  
+ 
+//Count logs ingested in the last 6 hours
+Table | where ingestion_time() >= ago (6h) | count
+ 
+//-------------------------------------Field Manipulation/Extraction-----------------------------------------
+//Function                      |Description
+//parse_json() or todynamic()   |Interprets a string as a JSON value and returns the value as dynamic. Use either of these to refer to a field: JsonField.Key or JsonField["Key"]
+//bag_unpack                    |The bag_unpack plugin unpacks a single column of type dynamic, by treating each property bag top-level slot as a column.
+//mv_expand()                   |Applied on a dynamic-typed array or property bag column so that each value in the collection gets a separate row. All the other columns in an expanded row are duplicated. mv_expand is the easiest way to process JSON arrays.
+//mv_apply()                    |Applies a subquery to each record and returns the union of the results of all subqueries. Apply a query to each value in an array.
+ 
+//extract json nested fields
+Table | extend TargetUserName = tostring(parse_json(record).TargetUserName)
+ 
+//concatenate values from the domain column, with a double forward slash, and values from the username column.
+Table | extend Account = strcat(domain, "//", username)
+ 
+//regex
+Table | extend extract_all(@"user (\w+).*user (\w+)", "user tom and user jerry are at it again") // [["tom","jerry"]]
+| project  FileExtension =  (extract("\\.[0-9a-z]+$",0,TargetFileName)), TargetFileName, event_simpleName
+ 
+//dynamic data types
+//We are using the second group (counting 0,1,2) within the JSON and then calling "labeledName", so the query says use column msgParts, count 2 within the array, and retrieve "labeledName".
+Table | extend tostring(msgParts[2].labeledName),attachment_extension = tostring(msgParts[2].labeledExt)
+ 
+// using iif you can perform multiple calculations to determine a string value or additional calculations
+Table | extend Priority = iif(status=="Failure" and department=="Server Administrator", "High Priority", "Normal Priority")
+ 
+//Replace Strings
+Table | extend replace_string("Hello world!", "Hello", "Goodbye")
+ 
+//Combine Fields
+Table | extend name_dept = strcat(name," - ",department)
+ 
+//Retrieve first not null field
+Table | extend Priority = coalesce(Priority,Urgency)
+ 
+// All user boxes use the format first.last@domain.com. Most shared boxes have a longer name without a period.
+// We're going to use the presence of a '.' in the mailboxownerUPN as a proxy for being a user box. This won't eliminate ALL shared boxes, but the majority of them
+Table | extend NumPeriods = array_length(split(MailboxOwnerUPN, '.'))
+ 
+//Extract request # from message
+Table | where SyslogMessage  has_cs 'request'
+// go to 8 position and take 2 chars then put into new column titled 'req#'
+| extend req# = substring(SyslogMessage, 8,2)
+| project req#, req, SyslogMessage
+ 
+//Remove the "Request XX:" prefix from the Syslog message.
+//Use trim() or  trim_start() with the following regular expression: request \d+:
+Table | extend trim(@"request \d+:", SyslogMessage)
+ 
+//Extract username and filename
+Table | extend userfile=extract_all(@"User\s(\w+).*\s(\w+\.\S+)\sfrom", SyslogMessage)[0]
+| extend User=userfile[0], File=userfile[1]
+ 
+//Extrac Blurbs of Text
+Table | where event_simpleName contains "Script"
+| extend blurb = extract("(.{1,30}(bitfinex|ethereum).{1,30})",1,ScriptContent)
+| where not(blurb == "")
+| project TimeGenerated,TargetFileName,event_simpleName,blurb,record
+ 
+//-------------------------------------Query queries ran against ADX from a Table named ADXQuery-----------------------------------------
+//Show queries ran against ADX
+ADXQuery  | where TimeGenerated > ago(1d) //and User == 'hehe@haha.com'
+| where DatabaseName != 'boring' and User !startswith "lolsvc"
+| project DatabaseName, State, FailureReason, Text, Duration, StartedOn, TotalRowsCount, ScannedRowsCount, CacheMemoryHits, User, Principal
+ 
+//Show query metrics by App
+ADXQuery  | where TimeGenerated > ago(1h)  
+| summarize  avg(toint(ScannedExtentsCount)), avg(toint(Duration)), avg(toint(TotalRowsCount)), avg(toint(CacheMemoryHits)), c=count(State) by ApplicationName
+ 
+//Show dashboard info
+ADXQuery | where StartedOn > ago(1d)
+| where CorrelationId startswith "Kusto.Web.KWE.Dashboards"
+| extend DashboardID = split(CorrelationId, ";")[2]
+| summarize count() by tostring(DashboardID), User
+ 
+//-------------------------------------Timezones/Dashboards/Paramenters-----------------------------------------
+//KQL Dashboards do not have a submit button, which means when a dashboard is opened, it will immediately run.
+//These are mitigations to hardcode the dashboard to short/no time values
+//Defines parameterized variables for time range handling and timezone offset calculation, intended to be used as a reusable header
+//Sets up input parameters (account, time range, timezone)
+ 
+//Dynamically decides which time window to use and converts a timezone string into a numeric offset
+//Daylight time hour offset
+UTC 0 hours
+PDT 7 hours
+MDT 6 hours
+CDT 5 hours
+EDT 4 hours
+Anything else 0 hours
+ 
+//iif(condition, value_if_true, value_if_false)
+//If _accounts equals the literal string "PLACEHOLDER":
+//_st is set to the current time  now(0s) Returns the current timestamp
+//Else:
+//_st is set to _startTime
+let _st = iif(_account=="PLACEHOLDER",now(0s),_startTime);
+let _et = iif(_account=="PLACEHOLDER",now(0s),_endTime);
+ 
+let _endTime = datetime(2026-04-02T14:31:32Z);
+let _startTime = datetime(2026-04-02T13:31:32Z);
+let _tzone = 'CDT'; //Default Central
+let _tz =
+    iif(_tzone=="UTC",0h,
+    iif(_tzone=="PDT",7h,
+    iif(_tzone=="MDT",6h,
+    iif(_tzone=="CDT",5h,
+    iif(_tzone=="EDT",4h,
+    0h)))));
+Table
+| where TimeGenerated between (_startTime .. _endTime )
+| extend CST = TimeGenerated - 5h
+| extend EST = TimeGenerated - 4h
+| extend PST = TimeGenerated - 7h
+| extend TimeGenerated = TimeGenerated -_tz
+ 
+let _account = 'PLACEHOLDER'; //Assigning the literal string PLACEHOLDER to _account variable
+let _startTime = datetime(2026-01-02T01:00:00Z);  //tokenized parameter in dashboard
+let _endTime = datetime(2026-01-01T01:00:01Z); //tokenized parameter in dashboard //Hardcode _endTime to be 1 second later
+let _tzone = 'UTC'; //default to UTC
+let _st = iif(_account=="PLACEHOLDER",now(),_startTime); //If _account equals "PLACEHOLDER" then assign _st to now() assign _st = _startTime //This prevents dashboard from running until a parameter is given (look)
+let _et = iif(_account=="PLACEHOLDER",now(),_endTime);
+let _tz =
+    iif(_tzone=="UTC",0h,
+    iif(_tzone=="PDT",7h,
+    iif(_tzone=="MDT",6h,
+    iif(_tzone=="CDT",5h,
+    iif(_tzone=="EDT",4h,
+    0h)))));
+Table
+| where TimeGenerated between (_st.._et)
+| extend TimeGenerated = TimeGenerated -_tz
+ 
+//-------------------------------------Engineering ETL adding new columns-----------------------------------------
+//Nw columns need to be added for these 2 fields: df_hostname, df_hosthead
+//first
+.alter-merge table ZscalerWeb (df_hosthead:string,df_hostname:string )
+ 
+//Second
+.create-or-alter function with (docstring = "Extracts Proxy Events from NetworkStaging table", folder = "UpdatePolicies") ProxyIngestion()
+{ NetworkStaging | where record.LogSource == "proxy-web"
+| project TimeGenerated=todatetime(record.TimeGenerated), Action=tostring(record.Action), appclass=tostring(record.appclass), appname=tostring(record.appname),
+appproto=tostring(record.appproto), build_number=tostring(record.build_number), build_sha=tostring(record.build_sha), cat=tostring(record.cat),
+contenttype=tostring(record.contenttype), devicehostname=tostring(record.devicehostname), deviceowner=tostring(record.deviceowner), devTime=tostring(record.devTime),
+devType=tostring(record.['(DEVTYPE']), dlpdict=tostring(record.dlpdict), dlpeng=tostring(record.dlpeng), dst=tostring(record.dst), dstBytes=toint(record.dstBytes),
+fileclass=tostring(record.fileclass), filetype=tostring(record.filetype), host=tostring(record.host), hostname=tostring(record.hostname),
+keyprotectiontype=tostring(record.keyprotectiontype), LinkID=tostring(record.LinkID), malwareclass=tostring(record.malwareclass), malwaretype=tostring(record.malwaretype),
+Milo=tostring(record.Milo), policy=tostring(record.policy), Product=tostring(record.Product), realm=tostring(record.realm), recordid=tostring(record.recordid),
+referer=tostring(record.referer), reqmethod=tostring(record.reqmethod), respcode=tostring(record.respcode), riskscore=tostring(record.riskscore), role=tostring(record.role),
+scale=tostring(record.scale), software=tostring(record.software), source=tostring(record.source), sourcetype=tostring(record.sourcetype), src=tostring(record.src),
+srcBytes=toint(record.srcBytes), srcPostNAT=tostring(record.srcPostNAT), SubProduct=tostring(record.SubProduct), threatname=tostring(record.threatname),
+unscannabletype=tostring(record.unscannabletype), url=tostring(record.url), urlcategory=tostring(record.urlcategory), urlclass=tostring(record.urlclass),
+urlsupercategory=tostring(record.urlsupercategory), useragent=tostring(record.useragent), usrName=tostring(record.usrName), Version=tostring(record.Version),
+record,df_hosthead=tostring(record.df_hosthead),df_hostname=tostring(record.df_hostname) } //domain fronting fields extracted voila!
+ 
+ 
