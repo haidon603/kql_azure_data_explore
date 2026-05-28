@@ -1,0 +1,5 @@
+let TorExitNodes = externaldata (IpAddress:string, Source:string, Description:string) ['https://firewalliplists.gypthecat.com/lists/kusto/kusto-tor-exit.csv.zip'] with (ignoreFirstRecord=true);
+DeviceLogonEvents //consider expanding to other authentication and network logs //look at ingress and egress
+| where RemoteIPType != 'Private'
+| where ActionType == 'LogonSuccess'
+| evaluate ipv4_lookup(TorExitNodes, RemoteIP, IpAddress, return_unmatched=false)
