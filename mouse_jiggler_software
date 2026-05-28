@@ -1,0 +1,29 @@
+//could be a threat actor trying to maintain access or timecard fraud . . . 
+let SuspiciousTerms = dynamic([
+    "mousejiggle",
+    "mouse jiggle",
+    "jiggle",
+    "move",
+    "wiggler",
+    "caffeine",
+    "amphetamine",
+    "stayawake",
+    "keepawake",
+    "nosleep",
+    "move mouse",
+    "mousemove",
+    "autoclick",
+    "auto click",
+    "cursor",
+    "keep alive",
+    "idleprevent",
+    "antiidle",
+    "preventsleep",
+    "dontsleep",
+    "noidle",
+    "activity simulator"
+]);
+database('Endpoint').edr
+| where ingestion_time() > ago(30d) and ImageFileName has_any (SuspiciousTerms) and not(ImageFileName contains "mylegit nosleep")
+| summarize count() by ImageFileName,ComputerName
+ 
