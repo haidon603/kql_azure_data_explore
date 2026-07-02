@@ -1,0 +1,12 @@
+let _endTime = datetime(2026-01-02T17:13:40Z);
+let _startTime = datetime(2026-01-02T11:13:40Z);
+let _tzone = 'CDT'; //modify as needed
+let _tz =
+    iif(_tzone=="UTC",0h,
+    iif(_tzone=="PDT",7h,
+    iif(_tzone=="MDT",6h,
+    iif(_tzone=="CDT",5h,
+    iif(_tzone=="EDT",4h,
+    0h)))));
+Table
+| where TimeGenerated between (_startTime .. _endTime )
