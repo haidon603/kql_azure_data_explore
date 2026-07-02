@@ -1,0 +1,42 @@
+//IoC Search, return which table it was seen in  the Endpoint Database, update line 42 as appropriate 
+let _ip = '';
+let findSourceIPLogs = (arg0:string, arg1:string)
+{ union database(arg0).*
+| extend client_ip = column_ifexists("client_ip",0)
+| extend source_ip = column_ifexists("source_ip",0)
+| extend src_ip = column_ifexists("src_ip",0)
+| extend DeviceIPAddress = column_ifexists("DeviceIPAddress",0)
+| extend NASIPAddress = column_ifexists("NASIPAddress",0)
+| extend NASIPv6Address = column_ifexists("NASIPv6Address",0)
+| extend srcip = column_ifexists("srcip",0)
+| extend IPAddress = column_ifexists("IPAddress",0)
+| extend IPAddressFromResourceProvider = column_ifexists("IPAddressFromResourceProvider",0)
+| extend IpAddress = column_ifexists("IpAddress",0)
+| extend Client_IPAddress = column_ifexists("Client_IPAddress",0)
+| extend ClientIP = column_ifexists("ClientIP",0)
+| extend ClientIP_ = column_ifexists("ClientIP_",0)
+| extend clientIP = column_ifexists("clientIP",0)
+| extend FromIP = column_ifexists("FromIP",0)
+| extend src_ip = column_ifexists("src_ip",0)
+| extend IpAddress = column_ifexists("IpAddress",0)
+| extend aip = column_ifexists("aip",0)
+| extend LocalAddressIP4 = column_ifexists("LocalAddressIP4",0)
+| extend aip = column_ifexists("aip",0)
+| extend CurrentLocalIP = column_ifexists("CurrentLocalIP",0)
+| extend LocalAddressIP4 = column_ifexists("LocalAddressIP4",0)
+| extend aip = column_ifexists("aip",0)
+| extend FirstIP4Record = column_ifexists("FirstIP4Record",0)
+| extend FirstIP6Record = column_ifexists("FirstIP6Record",0)
+| extend IP4Records = column_ifexists("IP4Records",0)
+| extend IP6Records = column_ifexists("IP6Records",0)
+| extend LocalIP = column_ifexists("LocalIP",0)
+| extend OriginSourceIpAddress = column_ifexists("OriginSourceIpAddress",0)
+| extend UserIp = column_ifexists("UserIp",0)
+| extend client_ip = column_ifexists("client_ip",0)
+| where ingestion_time() > ago(1d) and
+    (src_ip == arg1 or client_ip == arg1 or source_ip == arg1 or DeviceIPAddress == arg1 or NASIPAddress == arg1 or NASIPv6Address==arg1 or srcip == arg1 or
+    IPAddress == arg1 or IPAddressFromResourceProvider  == arg1 or IpAddress == arg1 or Client_IPAddress == arg1 or ClientIP == arg1 or ClientIP_ == arg1 or clientIP == arg1 or
+    FromIP == arg1 or src_ip == arg1 or IpAddress == arg1 or aip == arg1 or LocalAddressIP4 == arg1 or aip == arg1 or CurrentLocalIP == arg1 or LocalAddressIP4 == arg1 or  aip == arg1 or
+    IP4Records == arg1 or IP6Records == arg1 or LocalIP == arg1 or OriginSourceIpAddress == arg1 or UserIp == arg1 or client_ip == arg1)
+};
+findSourceIPLogs("Endpoint",_ip) | summarize count() by LogSource //UPDATE DATABASE NAME AS APPROPRIATE
