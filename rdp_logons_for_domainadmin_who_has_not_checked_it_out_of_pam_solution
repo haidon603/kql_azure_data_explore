@@ -1,0 +1,16 @@
+//Find Domain Admin account check-outs in PAM, then retrieve RDP logs from DCs and to find accounts that have RDP'd to DCs but NOT checked out an account from PAM solution.
+let DA_DC_RDP =
+database('Infrastructure').PAM
+| where ingestion_time() > ago(1d)
+| where act == "Retrieve password"
+| where duser startswith "prefix" or duser startswith "prefix" and duser endswith "suffix"
+| project duser;
+database('Endpoint').CrowdStrikeFDR
+| where TimeGenerated between (_startTime .._endTime )
+| where event_simpleName startswith "UserLogon"
+| where LogonType == "10"
+| where ComputerName startswith "mydc" or ComputerName startswith "otherdc"
+| where UserName startswith "mynamescheme" or UserName startswith "othernamescheme"
+| where not (UserName has_any (DA_DC_RDP))
+| extend TimeGenerated = TimeGenerated -_tz
+| summarize count=count() by UserName, ComputerName, LogonType, TimeGenerated;
