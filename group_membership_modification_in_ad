@@ -1,0 +1,9 @@
+let _group = '';
+let _user = '';
+WindowsEvents
+| where ingestion_time() > ago(1d)
+| where MessageProperties has _user
+| where EventId has_any ("4729","4732","4728","4757")
+| extend Group = tostring(record.Properties.TargetUserName), SourceAccount = tostring(record.Properties.SubjectUserName), Target = tostring(record.Properties.MemberName)
+| where Group has _group
+| project TimeGenerated, Group, SourceAccount, Target, MessageDetails, EventId
