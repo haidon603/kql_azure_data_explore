@@ -1,0 +1,4 @@
+//Tenable Default Language Pack - 1033 is English
+TenableIOVulnerabilities(include_unlicensed=true, include_info=true)
+| where plugin_name ==  'Windows Language Settings Detection'
+| summarize c=count() by output
