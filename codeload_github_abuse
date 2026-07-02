@@ -1,0 +1,10 @@
+//codeload.github.com is a legitimate GitHub domain used specifically to serve repository archives (ZIP and TAR.GZ files). 
+//However, because it is a trusted source for downloading code, it is frequently abused by threat actors to distribute malware and bypass security filters.
+proxy
+| where TimeGenerated > ago(1d)
+| where hostname == "codeload.github.com" and action == "Allowed"
+| where filename !startswith "mycomp-" and filename!='None'
+| where isnotempty(filetype)
+| summarize make_set(contenttype),count(filename), make_set(devicehostname), make_set(referer),make_set(hostname), make_set(useragent), c=count() by filename, filetype, fileclass
+
+
